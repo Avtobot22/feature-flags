@@ -1,0 +1,17 @@
+name: Возможность
+description: Новая возможность или изменение API
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Задача
+      description: Сценарий потребителя и ограничения текущего решения.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Критерии готовности
+      description: Наблюдаемое поведение, ограничения и требования к совместимости.
+    validations:
+      required: true
