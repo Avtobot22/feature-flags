@@ -1,5 +1,17 @@
 version: 2
 updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+    groups:
+      kotlin:
+        patterns: ['org.jetbrains.kotlin*']
+      detekt:
+        patterns: ['io.gitlab.arturbosch.detekt*']
   - package-ecosystem: github-actions
     directory: /
     schedule:

@@ -1,0 +1,47 @@
+build:
+  maxIssues: 0
+  excludeCorrectable: false
+
+config:
+  validation: true
+  warningsAsErrors: true
+
+coroutines:
+  GlobalCoroutineUsage:
+    active: true
+
+exceptions:
+  NotImplementedDeclaration:
+    active: true
+
+naming:
+  EnumNaming:
+    enumEntryPattern: '[A-Z][A-Z0-9]*(_[A-Z0-9]+)*'
+
+style:
+  MagicNumber:
+    excludes: ['**/src/test/**']
+    ignorePropertyDeclaration: true
+  ReturnCount:
+    excludeGuardClauses: true
+  MaxLineLength:
+    active: false
+  ModifierOrder:
+    active: false
+  UnusedImports:
+    active: false
+  WildcardImport:
+    active: false
+
+formatting:
+  active: true
+  MaximumLineLength:
+    maxLineLength: 120
+  NoWildcardImports:
+    packagesToUseImportOnDemandProperty: ''
+  TrailingCommaOnCallSite:
+    active: true
+    useTrailingCommaOnCallSite: true
+  TrailingCommaOnDeclarationSite:
+    active: true
+    useTrailingCommaOnDeclarationSite: true
