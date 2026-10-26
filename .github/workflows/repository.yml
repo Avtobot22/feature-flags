@@ -66,6 +66,10 @@ jobs:
       - name: Install Android build tools
         run: |
           "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Free disk space for Android emulator
+        run: |
+          sudo rm -rf -- "${ANDROID_HOME:?}/ndk"
+          df -h "${RUNNER_TEMP}"
       - name: Check and build SDK
         run: ./gradlew qualityCheck :buildSrc:validatePlugins --stacktrace
       - name: Install Android test image
@@ -73,20 +77,32 @@ jobs:
           "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" 'emulator' 'system-images;android-34;google_apis;x86_64'
       - name: Run Android assets tests
         timeout-minutes: 10
+        env:
+          ANDROID_AVD_HOME: ${{ runner.temp }}/android-avd
         run: |
           sudo chmod a+rw /dev/kvm
-          printf 'no\n' | "${ANDROID_HOME}/cmdline-tools/latest/bin/avdmanager" create avd --name feature-flags-ci \
-            --package 'system-images;android-34;google_apis;x86_64' --force
+          mkdir -p "${ANDROID_AVD_HOME}"
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/avdmanager" create avd --name feature-flags-ci \
+            --package 'system-images;android-34;google_apis;x86_64' --device pixel \
+            --path "${ANDROID_AVD_HOME}/feature-flags-ci.avd" --force < /dev/null
+          test -f "${ANDROID_AVD_HOME}/feature-flags-ci.ini"
           emulator_bin="${ANDROID_HOME}/emulator/emulator"
           adb_bin="${ANDROID_HOME}/platform-tools/adb"
+          "${emulator_bin}" -list-avds
+          "${adb_bin}" start-server
+          df -h "${ANDROID_AVD_HOME}"
+          available_kib=$(df -Pk "${ANDROID_AVD_HOME}" | awk 'NR == 2 {print $4}')
+          if (( available_kib < 10 * 1024 * 1024 )); then
+            echo 'Android emulator requires at least 10 GiB of free runner disk space.' >&2
+            exit 1
+          fi
           "${emulator_bin}" -avd feature-flags-ci -port 5554 -no-window \
             -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
             > "${RUNNER_TEMP}/emulator.log" 2>&1 &
           emulator_pid=$!
           trap '"${adb_bin}" -s emulator-5554 emu kill || true' EXIT
-          timeout 300 "${adb_bin}" -s emulator-5554 wait-for-device
           boot_deadline=$((SECONDS + 300))
-          until [[ "$("${adb_bin}" -s emulator-5554 shell getprop sys.boot_completed | tr -d '\r')" == '1' ]]; do
+          until [[ "$("${adb_bin}" -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == '1' ]]; do
             if (( SECONDS >= boot_deadline )) || ! kill -0 "${emulator_pid}"; then
               cat "${RUNNER_TEMP}/emulator.log"
               exit 1
