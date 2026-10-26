@@ -64,16 +64,18 @@ jobs:
         with:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
       - name: Install Android build tools
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+        run: |
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
       - name: Check and build SDK
         run: ./gradlew qualityCheck :buildSrc:validatePlugins --stacktrace
       - name: Install Android test image
-        run: sdkmanager 'emulator' 'system-images;android-34;google_apis;x86_64'
+        run: |
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" 'emulator' 'system-images;android-34;google_apis;x86_64'
       - name: Run Android assets tests
         timeout-minutes: 10
         run: |
           sudo chmod a+rw /dev/kvm
-          printf 'no\n' | avdmanager create avd --name feature-flags-ci \
+          printf 'no\n' | "${ANDROID_HOME}/cmdline-tools/latest/bin/avdmanager" create avd --name feature-flags-ci \
             --package 'system-images;android-34;google_apis;x86_64' --force
           emulator_bin="${ANDROID_HOME}/emulator/emulator"
           adb_bin="${ANDROID_HOME}/platform-tools/adb"
