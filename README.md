@@ -2,12 +2,14 @@
 
 Типобезопасный SDK фича-тоглов для Kotlin и Android. Ядро работает на JVM без Android SDK.
 
-Реализованы определения флагов, атомарные снимки, Reader с Flow и readiness, JSON codec и ручная загрузка с явной политикой fallback. Android assets и HTTP-адаптеры ещё не реализованы. Опубликованных артефактов нет.
+Реализованы определения флагов, атомарные снимки, Reader с Flow и readiness, JSON codec, ручная загрузка с явной политикой fallback и адаптеры Retrofit/Android assets. Опубликованных артефактов нет.
 
 ## Модули
 
 - `feature-flags-core` - определения, параметры, `Configuration`, `ConfigurationCodec`, `FeatureFlagsReader`, `Readiness` и загрузка через `FeatureFlagsSystem`. Использует Kotlin и coroutines; не зависит от Android и JSON-библиотек.
 - `feature-flags-json` - полный ответ через `JsonConfigurationCodec.decode` и отдельные параметры JSON object/null через `JsonParameters.decode`. Строки, дроби, экспоненциальная запись и переполнение не преобразуются в `Int`, а дают default параметра.
+- `feature-flags-retrofit` - JVM-источник `RetrofitFeatureFlagsSource` и HTTP-контракт `FeatureTogglesApi`. Получает готовый API клиент приложения.
+- `feature-flags-android` - `AssetsFeatureFlagsSource` для UTF-8 файлов из assets, Android API 21+.
 
 Общие настройки сборки находятся в `buildSrc`, версии - в [version catalog](gradle/libs.versions.toml). Зависимости между модулями задаются через типизированные `projects.*`.
 
@@ -37,6 +39,33 @@ fun createFlags(remote: FeatureFlagsSource, local: FeatureFlagsSource): FeatureF
 Конкурентные `refresh()` выполняются последовательно. `Applied` содержит revision, origin и число флагов. `refreshStatus` показывает `Idle`, `Running` или `Finished(result)` отдельно от readiness. Ошибки источников дают `Transport` или `LocalSource`, ошибки codec по `IllegalArgumentException` - `InvalidConfiguration(origin, cause)`. Произвольные ошибки codec распространяются вызывающему коду. Causes могут содержать приватные данные, поэтому их нельзя автоматически писать в логи.
 
 Ошибка загрузки сохраняет активный снимок. Отмена распространяется как `CancellationException`: до публикации она сохраняет прежнее состояние, после атомарной публикации новый снимок уже активен. При отмене выполняющегося обновления или неожиданной ошибке codec статус возвращается в `Idle`; отмена ожидающего вызова не меняет статус текущего обновления.
+
+## Retrofit и Android assets
+
+```kotlin
+import android.content.res.AssetManager
+import io.github.avtobot22.featureflags.FallbackPolicy
+import io.github.avtobot22.featureflags.FeatureFlagsSystem
+import io.github.avtobot22.featureflags.android.AssetsFeatureFlagsSource
+import io.github.avtobot22.featureflags.json.JsonConfigurationCodec
+import io.github.avtobot22.featureflags.retrofit.FeatureTogglesApi
+import io.github.avtobot22.featureflags.retrofit.RetrofitFeatureFlagsSource
+import retrofit2.Retrofit
+
+fun createAndroidFlags(retrofit: Retrofit, assets: AssetManager): FeatureFlagsSystem =
+    FeatureFlagsSystem(
+        remote = RetrofitFeatureFlagsSource(retrofit.create(FeatureTogglesApi::class.java)),
+        codec = JsonConfigurationCodec,
+        fallback = FallbackPolicy.OnRemoteEmpty,
+        local = AssetsFeatureFlagsSource(assets),
+    )
+```
+
+Приложение добавляет `android.permission.INTERNET` и файл `src/main/assets/FallbackFeatureToggles.json`. Имя или путь внутри assets можно передать вторым аргументом источника. SDK не поставляет локальную конфигурацию; отсутствующий файл даёт `LocalSource`, невалидный JSON - `InvalidConfiguration(BUNDLED_ASSET, cause)`.
+
+API выполняет `GET api/tv/feature-toggles` относительно `baseUrl` Retrofit, включая его префикс пути, с `Content-Type: application/json` и `X-Endpoint-Version: 1`. Принимается только HTTP 200; HTTP 204 и другие статусы дают ошибку источника. Тело передаётся codec без преобразования; JSON converter для Retrofit не требуется.
+
+Приложение настраивает base URL, таймауты, retry и авторизацию в своём Retrofit/OkHttp клиенте. Его interceptor добавляет `Authorization: Bearer ...` только при наличии актуального токена. Адаптер не хранит токен и не создаёт клиент. Оба источника выполняют блокирующее чтение на IO и закрывают ресурсы; отмена распространяется вызывающему коду.
 
 ## Чтение флагов
 
@@ -75,14 +104,20 @@ Codec проверяет весь документ и возвращает не�
 
 ## Сборка и проверки
 
-Нужен JDK 21. Android SDK для этих модулей не требуется.
+Нужны JDK 21 и Android SDK Platform 36 с Build Tools 36.0.0. Путь к SDK задаётся через `ANDROID_HOME` или `sdk.dir` в локальном `local.properties`.
 
 ```sh
 ./gradlew qualityCheck :buildSrc:validatePlugins
 python3 scripts/check_repository.py
 ```
 
-Команда выполняет статический анализ, тесты, сборку библиотек и проверку convention plugins. Отчёты находятся в `build/reports/` корня и соответствующих модулей. В Windows используй `gradlew.bat`.
+Команда выполняет статический анализ, JVM-тесты, Android lint, сборку библиотек и тестового APK, проверку convention plugins. Отчёты находятся в `build/reports/` корня и соответствующих модулей. В Windows используй `gradlew.bat`.
+
+На подключённом Android-устройстве или эмуляторе отдельно запускаются проверки чтения APK assets:
+
+```sh
+./gradlew :feature-flags-android:connectedDebugAndroidTest
+```
 
 Скрипт проверки файлов читает пути из индекса Git; новые файлы сначала добавь в индекс. Для проверки workflow нужен [actionlint](https://github.com/rhysd/actionlint):
 
@@ -90,7 +125,7 @@ python3 scripts/check_repository.py
 actionlint
 ```
 
-CI выполняет эти проверки и проверяет заголовок PR.
+CI выполняет эти проверки, запускает instrumented tests на эмуляторе и проверяет заголовок PR.
 
 ## Разработка
 
