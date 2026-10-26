@@ -1,0 +1,8 @@
+{
+  "featureToggles": [
+    {"feature":"dashboard.guestMode","enabled":true},
+    {"feature":"dashboard.prefetch","enabled":true,"parameters":{"depth":2,"maxConcurrent":8}},
+    {"feature":"dashboard.pagination","enabled":false,"parameters":{"pageSize":20}},
+    {"feature":"future.unknown","enabled":true,"parameters":{"nested":{"array":[1,null,"v"]}}}
+  ]
+}
