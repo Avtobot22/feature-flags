@@ -2,14 +2,14 @@
 
 Типобезопасный SDK фича-тоглов для Kotlin и Android. Ядро работает на JVM без Android SDK.
 
-Реализованы определения флагов, атомарные снимки, Reader с Flow и readiness, JSON codec, ручная загрузка с явной политикой fallback и адаптеры Retrofit/Android assets. Опубликованных артефактов нет.
+Реализованы определения флагов, атомарные снимки, Reader с Flow и readiness, JSON codec, ручная загрузка с явной политикой fallback, адаптеры Retrofit/Android assets и постоянный кэш с явными политиками загрузки. Опубликованных артефактов нет.
 
 ## Модули
 
-- `feature-flags-core` - определения, параметры, `Configuration`, `ConfigurationCodec`, `FeatureFlagsReader`, `Readiness` и загрузка через `FeatureFlagsSystem`. Использует Kotlin и coroutines; не зависит от Android и JSON-библиотек.
+- `feature-flags-core` - определения, параметры, `Configuration`, `ConfigurationCodec`, `FeatureFlagsReader`, `Readiness`, порт кэша и загрузка через `FeatureFlagsSystem`. Использует Kotlin и coroutines; не зависит от Android и JSON-библиотек.
 - `feature-flags-json` - полный ответ через `JsonConfigurationCodec.decode` и отдельные параметры JSON object/null через `JsonParameters.decode`. Строки, дроби, экспоненциальная запись и переполнение не преобразуются в `Int`, а дают default параметра.
 - `feature-flags-retrofit` - JVM-источник `RetrofitFeatureFlagsSource`. Получает suspend-функцию запроса приложения без привязки к endpoint и заголовкам.
-- `feature-flags-android` - `AssetsFeatureFlagsSource` для UTF-8 файлов из assets, Android API 21+.
+- `feature-flags-android` - `AssetsFeatureFlagsSource` для UTF-8 файлов из assets и `AtomicFileConfigurationCache` для постоянного кэша, Android API 21+.
 
 Общие настройки сборки находятся в `buildSrc`, версии - в [version catalog](gradle/libs.versions.toml). Зависимости между модулями задаются через типизированные `projects.*`.
 
@@ -39,6 +39,48 @@ fun createFlags(remote: FeatureFlagsSource, local: FeatureFlagsSource): FeatureF
 Конкурентные `refresh()` выполняются последовательно. `Applied` содержит revision, origin и число флагов. `refreshStatus` показывает `Idle`, `Running` или `Finished(result)` отдельно от readiness. Ошибки источников дают `Transport` или `LocalSource`, ошибки codec по `IllegalArgumentException` - `InvalidConfiguration(origin, cause)`. Произвольные ошибки codec распространяются вызывающему коду. Causes могут содержать приватные данные, поэтому их нельзя автоматически писать в логи.
 
 Ошибка загрузки сохраняет активный снимок. Отмена распространяется как `CancellationException`: до публикации она сохраняет прежнее состояние, после атомарной публикации новый снимок уже активен. При отмене выполняющегося обновления или неожиданной ошибке codec статус возвращается в `Idle`; отмена ожидающего вызова не меняет статус текущего обновления.
+
+## Постоянный кэш
+
+Кэш включается явно через `CacheSettings`; без него загрузка сохраняет описанное выше поведение. Core объявляет порт `ConfigurationCache`, Android-адаптер хранит полный документ в `AtomicFile` и повторно проверяет его тем же codec при восстановлении.
+
+```kotlin
+import io.github.avtobot22.featureflags.CacheMode
+import io.github.avtobot22.featureflags.CacheSettings
+import io.github.avtobot22.featureflags.android.AtomicFileConfigurationCache
+import java.io.File
+
+val system = FeatureFlagsSystem(
+    remote = remote,
+    codec = JsonConfigurationCodec,
+    fallback = FallbackPolicy.Never,
+    cache = CacheSettings(
+        storage = AtomicFileConfigurationCache(File(noBackupFilesDir, "feature-flags")),
+        scope = "production/flags-v1/anonymous",
+        ttlMillis = 60_000,
+        maxAgeMillis = 300_000,
+        mode = CacheMode.REMOTE_ONLY,
+    ),
+)
+```
+
+`remote` - источник приложения, `noBackupFilesDir` - приватный каталог Android Context. Значения TTL, максимального возраста и область выбирает приложение; область включает окружение, endpoint/версию codec и весь контекст ответа без токенов и персональных данных. Одной парой storage/scope владеет одна живая система; совместное владение несколькими системами или процессами не поддерживается.
+
+| Режим | Поведение `refresh()` |
+|---|---|
+| `NETWORK_FIRST` | Remote; при ошибке источника разрешён валидный кэш до maxAge |
+| `CACHE_FIRST` | Сначала свежий кэш до TTL; иначе remote и тот же fallback |
+| `REMOTE_ONLY` | Только remote; для явного восстановления перед сетевым refresh |
+
+В любом режиме `system.cache?.restore()` явно восстанавливает запись до maxAge без запроса remote/assets и без изменения refreshStatus. Результат - `CacheRestoreResult.Applied` или `Unavailable`. Ошибки схемы remote не запускают fallback. `OnRemoteEmpty` выбирает assets только после нового валидного пустого remote; пустой восстановленный кэш публикуется целиком как `CACHE`.
+
+Возраст до TTL включительно свежий, до maxAge включительно допускается stale. При maxAge=TTL stale запрещён. Будущие метки после перевода часов назад отклоняются; источник времени можно заменить через `CacheClock`. `Ready.age` и `Applied.age` показывают возраст и свежесть на момент публикации. Таймеров нет: TTL ограничивает повторное чтение кэша, активный снимок автоматически не истекает.
+
+После успешной публикации сохраняется исходный валидный remote, включая пустой документ при выборе assets. Assets не перезаписывают LKG. Если выбранный asset недоступен или невалиден, прежние память и кэш сохраняются. `Applied.cacheWrite` отдельно сообщает `Saved`, `Failure(cause)` или `NotRequested`; отказ записи не откатывает память. При отмене после публикации новый снимок уже активен, а на диске может остаться прежняя полная запись.
+
+При logout или смене контекста владелец вызывает `system.cache?.invalidate()`. Система сразу закрывается и сбрасывает память; её поздний запрос не сможет опубликовать результат или заполнить кэш. Очистка диска завершается после уже начавшейся записи. `Failure` удаления и отмена требуют повторной очистки перед повторным использованием области. Затем создаётся новая система для нового контекста. Чтение закрытой системы возвращает defaults.
+
+Android-адаптер использует checksum, ограничения размера (по умолчанию 1 MiB для документа) и атомарную замену. Данные хранятся без шифрования; конфигурация не должна содержать секреты. Причины ошибок кэша, как и загрузки, нельзя автоматически писать в логи.
 
 ## Retrofit и Android assets
 

@@ -20,7 +20,7 @@ naming:
 
 style:
   MagicNumber:
-    excludes: ['**/src/test/**']
+    excludes: ['**/src/test/**', '**/src/androidTest/**']
     ignorePropertyDeclaration: true
   ReturnCount:
     excludeGuardClauses: true

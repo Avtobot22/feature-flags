@@ -10,4 +10,5 @@ internal data class ActiveSnapshot(
     val revision: Long,
     val origin: ConfigOrigin,
     val configuration: Configuration,
+    val age: ConfigurationAge? = null,
 )
