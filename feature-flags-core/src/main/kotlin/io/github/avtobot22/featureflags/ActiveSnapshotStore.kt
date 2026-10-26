@@ -15,11 +15,19 @@ internal class ActiveSnapshotStore {
         return replaceAll(RawConfiguration(toggles), origin)
     }
 
-    fun replaceAll(configuration: Configuration, origin: ConfigOrigin): ActiveSnapshot {
+    fun clear() {
+        mutableSnapshots.value = null
+    }
+
+    fun replaceAll(
+        configuration: Configuration,
+        origin: ConfigOrigin,
+        age: ConfigurationAge? = null,
+    ): ActiveSnapshot {
         while (true) {
             val previous = mutableSnapshots.value
             val revision = Math.addExact(previous?.revision ?: 0L, 1L)
-            val next = ActiveSnapshot(revision, origin, configuration)
+            val next = ActiveSnapshot(revision, origin, configuration, age)
             if (mutableSnapshots.compareAndSet(previous, next)) return next
         }
     }
@@ -39,4 +47,4 @@ private class SnapshotReadiness(private val snapshots: StateFlow<ActiveSnapshot?
 }
 
 private fun ActiveSnapshot?.toReadiness(): Readiness =
-    if (this == null) Readiness.NotInitialized else Readiness.Ready(revision, origin)
+    if (this == null) Readiness.NotInitialized else Readiness.Ready(revision, origin, age)

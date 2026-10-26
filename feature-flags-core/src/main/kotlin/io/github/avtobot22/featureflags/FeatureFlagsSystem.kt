@@ -6,9 +6,11 @@ public class FeatureFlagsSystem(
     codec: ConfigurationCodec,
     fallback: FallbackPolicy,
     local: FeatureFlagsSource? = null,
+    cache: CacheSettings? = null,
 ) {
     public val reader: FeatureFlagsReader
     public val manager: FeatureFlagsManager
+    public val cache: FeatureFlagsCache?
 
     init {
         require(fallback != FallbackPolicy.OnRemoteEmpty || local != null) {
@@ -16,6 +18,8 @@ public class FeatureFlagsSystem(
         }
         val store = ActiveSnapshotStore()
         reader = SnapshotFeatureFlagsReader(store)
-        manager = DefaultFeatureFlagsManager(remote, codec, fallback, local, store)
+        val cachedManager = cache?.let { CachedFeatureFlagsManager(remote, codec, fallback, local, store, it) }
+        manager = cachedManager ?: DefaultFeatureFlagsManager(remote, codec, fallback, local, store)
+        this.cache = cachedManager
     }
 }
