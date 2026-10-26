@@ -24,3 +24,6 @@ private class GenerationParameters(private val generation: Int) : ParameterReade
 
     override fun string(name: String, default: String): String = default
 }
+
+internal val Configuration.rawFlags: Map<String, RawToggle>
+    get() = (this as RawConfiguration).flags

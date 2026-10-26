@@ -18,7 +18,7 @@ class ActiveSnapshotStoreTest {
         val snapshot = store.replaceAll(emptyList(), ConfigOrigin.REMOTE)
 
         assertEquals(1L, snapshot.revision)
-        assertEquals(emptyMap(), snapshot.flags)
+        assertEquals(emptyMap(), snapshot.configuration.rawFlags)
         assertSame(snapshot, store.snapshots.value)
         assertEquals(Readiness.Ready(1, ConfigOrigin.REMOTE), store.readiness.value)
         assertEquals(listOf(store.readiness.value), store.readiness.replayCache)
@@ -34,7 +34,7 @@ class ActiveSnapshotStoreTest {
             ConfigOrigin.BUNDLED_ASSET,
         )
 
-        assertEquals(setOf("new", "New"), snapshot.flags.keys)
+        assertEquals(setOf("new", "New"), snapshot.configuration.rawFlags.keys)
         assertEquals(ConfigOrigin.BUNDLED_ASSET, snapshot.origin)
         assertEquals(2L, snapshot.revision)
     }
@@ -87,12 +87,12 @@ class ActiveSnapshotStoreTest {
         input["added"] = RawToggle("added", true)
         input.clear()
 
-        assertEquals(mapOf("flag" to RawToggle("flag", true)), first.flags)
+        assertEquals(mapOf("flag" to RawToggle("flag", true)), first.configuration.rawFlags)
         val list = mutableListOf(RawToggle("other", false))
         val second = store.replaceAll(list, ConfigOrigin.REMOTE)
         list.clear()
-        assertEquals(setOf("other"), second.flags.keys)
-        assertEquals(setOf("flag"), first.flags.keys)
+        assertEquals(setOf("other"), second.configuration.rawFlags.keys)
+        assertEquals(setOf("flag"), first.configuration.rawFlags.keys)
     }
 
     @Test
@@ -100,7 +100,7 @@ class ActiveSnapshotStoreTest {
         val snapshot = ActiveSnapshotStore().replaceAll(listOf(RawToggle("flag", true)), ConfigOrigin.REMOTE)
 
         assertFailsWith<UnsupportedOperationException> {
-            (snapshot.flags as MutableMap)["injected"] = RawToggle("injected", true)
+            (snapshot.configuration.rawFlags as MutableMap)["injected"] = RawToggle("injected", true)
         }
     }
 

@@ -9,5 +9,5 @@ internal data class RawToggle(
 internal data class ActiveSnapshot(
     val revision: Long,
     val origin: ConfigOrigin,
-    val flags: Map<String, RawToggle>,
+    val configuration: Configuration,
 )
