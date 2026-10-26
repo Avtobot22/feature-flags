@@ -45,8 +45,8 @@ public object JsonConfigurationCodec : ConfigurationCodec {
 }
 
 internal class JsonConfiguration(val flags: Map<String, JsonToggle>) : Configuration {
-    override val isEmpty: Boolean
-        get() = flags.isEmpty()
+    override val flagCount: Int
+        get() = flags.size
 
     override fun <T> evaluate(definition: FlagDefinition<T>): T =
         definition.evaluate(flags[definition.key] ?: MissingToggle)

@@ -56,9 +56,10 @@ class SnapshotConcurrencyTest {
                             listOf(toggle(generation), toggle(generation, "other")),
                             ConfigOrigin.REMOTE,
                         )
-                        assertEquals(setOf("flag", "other"), snapshot.flags.keys)
-                        assertEquals(generation, snapshot.flags.getValue("flag").parameters.int("generation", -1))
-                        assertEquals(generation, snapshot.flags.getValue("other").parameters.int("generation", -1))
+                        assertEquals(setOf("flag", "other"), snapshot.configuration.rawFlags.keys)
+                        val flags = snapshot.configuration.rawFlags
+                        assertEquals(generation, flags.getValue("flag").parameters.int("generation", -1))
+                        assertEquals(generation, flags.getValue("other").parameters.int("generation", -1))
                         snapshot.revision
                     }
                 }
@@ -98,9 +99,9 @@ class SnapshotConcurrencyTest {
                                 val value = reader.get(configuredFlag())
                                 assertEquals(value.params.generation % 2 == 0, value.enabled)
                                 val snapshot = requireNotNull(store.snapshots.value)
-                                assertEquals(setOf("flag", "other"), snapshot.flags.keys)
-                                val first = snapshot.flags.getValue("flag")
-                                val second = snapshot.flags.getValue("other")
+                                assertEquals(setOf("flag", "other"), snapshot.configuration.rawFlags.keys)
+                                val first = snapshot.configuration.rawFlags.getValue("flag")
+                                val second = snapshot.configuration.rawFlags.getValue("other")
                                 assertEquals(first.enabled, second.enabled)
                                 assertEquals(
                                     first.parameters.int("generation", -1),

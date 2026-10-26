@@ -10,21 +10,13 @@ internal class SnapshotFeatureFlagsReader(private val store: ActiveSnapshotStore
 
     override fun <T> get(definition: FlagDefinition<T>): T {
         val snapshot = store.snapshots.value
-        return definition.evaluate(snapshot.toInput(definition.key))
+        return snapshot.evaluate(definition)
     }
 
     override fun <T> observe(definition: FlagDefinition<T>): Flow<T> = store.snapshots
-        .map { definition.evaluate(it.toInput(definition.key)) }
+        .map { it.evaluate(definition) }
         .distinctUntilChanged()
 }
 
-private fun ActiveSnapshot?.toInput(key: String): EvaluationInput {
-    val toggle = this?.flags?.get(key)
-    return SnapshotEvaluationInput(toggle)
-}
-
-private class SnapshotEvaluationInput(toggle: RawToggle?) : EvaluationInput {
-    override val present: Boolean = toggle != null
-    override val enabled: Boolean = toggle?.enabled ?: false
-    override val parameters: ParameterReader = toggle?.parameters ?: ImmutableParameters.EMPTY
-}
+private fun <T> ActiveSnapshot?.evaluate(definition: FlagDefinition<T>): T =
+    if (this == null) definition.evaluate(SnapshotEvaluationInput(null)) else configuration.evaluate(definition)

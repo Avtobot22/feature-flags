@@ -5,7 +5,6 @@ import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.util.Collections
 
 internal class ActiveSnapshotStore {
     private val mutableSnapshots = MutableStateFlow<ActiveSnapshot?>(null)
@@ -13,14 +12,14 @@ internal class ActiveSnapshotStore {
     val readiness: StateFlow<Readiness> = SnapshotReadiness(snapshots)
 
     fun replaceAll(toggles: Collection<RawToggle>, origin: ConfigOrigin): ActiveSnapshot {
-        val prepared = toggles.toList()
-        val keys = HashSet<String>()
-        require(prepared.all { keys.add(it.key) }) { "Duplicate feature key." }
-        val flags = Collections.unmodifiableMap(prepared.associateBy { it.key })
+        return replaceAll(RawConfiguration(toggles), origin)
+    }
+
+    fun replaceAll(configuration: Configuration, origin: ConfigOrigin): ActiveSnapshot {
         while (true) {
             val previous = mutableSnapshots.value
             val revision = Math.addExact(previous?.revision ?: 0L, 1L)
-            val next = ActiveSnapshot(revision, origin, flags)
+            val next = ActiveSnapshot(revision, origin, configuration)
             if (mutableSnapshots.compareAndSet(previous, next)) return next
         }
     }
