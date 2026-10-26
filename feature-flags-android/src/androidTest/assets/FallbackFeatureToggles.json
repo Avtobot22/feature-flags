@@ -1,0 +1,6 @@
+{
+  "featureToggles": [
+    {"feature": "dashboard.guestMode", "enabled": true},
+    {"feature": "будущий.флаг", "enabled": true}
+  ]
+}

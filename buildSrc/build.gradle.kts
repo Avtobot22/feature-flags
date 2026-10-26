@@ -13,6 +13,7 @@ kotlin {
 dependencies {
     implementation(files(LibrariesForLibs::class.java.protectionDomain.codeSource.location))
     implementation(libs.kotlin.gradle.plugin)
+    implementation(libs.android.gradle.plugin)
 }
 
 gradlePlugin {
@@ -20,6 +21,10 @@ gradlePlugin {
         register("kotlinLibrary") {
             id = libs.plugins.featureflags.kotlin.library.get().pluginId
             implementationClass = "KotlinLibraryConventionPlugin"
+        }
+        register("androidLibrary") {
+            id = libs.plugins.featureflags.android.library.get().pluginId
+            implementationClass = "AndroidLibraryConventionPlugin"
         }
     }
 }

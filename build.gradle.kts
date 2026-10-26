@@ -9,7 +9,15 @@ detekt {
     buildUponDefaultConfig = true
     config.setFrom(files("config/detekt/detekt.yml"))
     source.setFrom(
-        files("build.gradle.kts", "settings.gradle.kts", "buildSrc", "feature-flags-core", "feature-flags-json"),
+        files(
+            "build.gradle.kts",
+            "settings.gradle.kts",
+            "buildSrc",
+            "feature-flags-core",
+            "feature-flags-json",
+            "feature-flags-retrofit",
+            "feature-flags-android",
+        ),
     )
     basePath = rootDir.absolutePath
     parallel = true
@@ -35,6 +43,13 @@ tasks.withType<Detekt>().configureEach {
 
 tasks.register("qualityCheck") {
     group = "verification"
-    description = "Runs Kotlin analysis, JVM tests, and builds SDK libraries."
-    dependsOn("detekt", ":feature-flags-core:build", ":feature-flags-json:build")
+    description = "Runs Kotlin analysis, JVM tests, Android lint, and builds SDK libraries."
+    dependsOn(
+        "detekt",
+        ":feature-flags-core:build",
+        ":feature-flags-json:build",
+        ":feature-flags-retrofit:build",
+        ":feature-flags-android:build",
+        ":feature-flags-android:assembleDebugAndroidTest",
+    )
 }
