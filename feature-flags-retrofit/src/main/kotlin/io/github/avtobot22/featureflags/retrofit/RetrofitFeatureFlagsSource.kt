@@ -4,18 +4,24 @@ import io.github.avtobot22.featureflags.FeatureFlagsSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import okhttp3.ResponseBody
 import retrofit2.HttpException
+import retrofit2.Response
 import java.io.IOException
-import java.net.HttpURLConnection
 import kotlin.coroutines.coroutineContext
 
-/** Only HTTP 200 is accepted. JSON validation remains the responsibility of the configuration codec. */
-public class RetrofitFeatureFlagsSource(private val api: FeatureTogglesApi) : FeatureFlagsSource {
+/**
+ * Accepts a successful HTTP response with a body; JSON validation belongs to the codec.
+ * The application supplies a cancellable, buffered Retrofit request and owns its endpoint and headers.
+ */
+public class RetrofitFeatureFlagsSource(
+    private val request: suspend () -> Response<ResponseBody>,
+) : FeatureFlagsSource {
     override suspend fun loadJson(): String = withContext(Dispatchers.IO) {
-        val response = api.getFeatureToggles()
+        val response = request()
         try {
             coroutineContext.ensureActive()
-            if (response.code() != HttpURLConnection.HTTP_OK) throw HttpException(response)
+            if (!response.isSuccessful) throw HttpException(response)
             val body = response.body() ?: throw IOException("Feature flags response has no body")
             body.string().also { coroutineContext.ensureActive() }
         } finally {

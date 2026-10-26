@@ -11,13 +11,16 @@ import io.github.avtobot22.featureflags.RefreshResult
 import io.github.avtobot22.featureflags.json.JsonConfigurationCodec
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
+import okhttp3.ResponseBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import retrofit2.HttpException
+import retrofit2.Response
 import retrofit2.Retrofit
+import retrofit2.http.GET
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
@@ -60,13 +63,17 @@ class RetrofitFeatureFlagsLoadingTest {
         server.enqueue(MockResponse().setBody(fixture("valid-nonempty.json")))
         system.manager.refresh()
 
-        for (code in listOf(204, 401, 500)) {
+        for (code in listOf(204, 205, 401, 500)) {
             server.enqueue(MockResponse().setResponseCode(code))
 
             val result = assertIs<RefreshResult.Failure>(system.manager.refresh())
             val error = assertIs<RefreshError.Transport>(result.error)
 
-            assertEquals(code, assertIs<HttpException>(error.cause).code())
+            if (code == 204 || code == 205) {
+                assertIs<IOException>(error.cause)
+            } else {
+                assertEquals(code, assertIs<HttpException>(error.cause).code())
+            }
             assertTrue(system.reader.get(guestMode))
             assertEquals(Readiness.Ready(1, ConfigOrigin.REMOTE), system.reader.readiness.value)
         }
@@ -103,9 +110,9 @@ class RetrofitFeatureFlagsLoadingTest {
 
     private fun system(): FeatureFlagsSystem {
         val api = Retrofit.Builder().baseUrl(server.url("/")).client(client).build()
-            .create(FeatureTogglesApi::class.java)
+            .create(ApplicationFlagsApi::class.java)
         return FeatureFlagsSystem(
-            remote = RetrofitFeatureFlagsSource(api),
+            remote = RetrofitFeatureFlagsSource(api::getFlags),
             codec = JsonConfigurationCodec,
             fallback = FallbackPolicy.OnRemoteEmpty,
             local = FeatureFlagsSource {
@@ -116,4 +123,9 @@ class RetrofitFeatureFlagsLoadingTest {
     }
 
     private fun fixture(name: String): String = checkNotNull(javaClass.getResource("/fixtures/$name")).readText()
+
+    private interface ApplicationFlagsApi {
+        @GET("settings/flags")
+        suspend fun getFlags(): Response<ResponseBody>
+    }
 }

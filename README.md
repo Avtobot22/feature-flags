@@ -8,7 +8,7 @@
 
 - `feature-flags-core` - определения, параметры, `Configuration`, `ConfigurationCodec`, `FeatureFlagsReader`, `Readiness` и загрузка через `FeatureFlagsSystem`. Использует Kotlin и coroutines; не зависит от Android и JSON-библиотек.
 - `feature-flags-json` - полный ответ через `JsonConfigurationCodec.decode` и отдельные параметры JSON object/null через `JsonParameters.decode`. Строки, дроби, экспоненциальная запись и переполнение не преобразуются в `Int`, а дают default параметра.
-- `feature-flags-retrofit` - JVM-источник `RetrofitFeatureFlagsSource` и HTTP-контракт `FeatureTogglesApi`. Получает готовый API клиент приложения.
+- `feature-flags-retrofit` - JVM-источник `RetrofitFeatureFlagsSource`. Получает suspend-функцию запроса приложения без привязки к endpoint и заголовкам.
 - `feature-flags-android` - `AssetsFeatureFlagsSource` для UTF-8 файлов из assets, Android API 21+.
 
 Общие настройки сборки находятся в `buildSrc`, версии - в [version catalog](gradle/libs.versions.toml). Зависимости между модулями задаются через типизированные `projects.*`.
@@ -48,13 +48,16 @@ import io.github.avtobot22.featureflags.FallbackPolicy
 import io.github.avtobot22.featureflags.FeatureFlagsSystem
 import io.github.avtobot22.featureflags.android.AssetsFeatureFlagsSource
 import io.github.avtobot22.featureflags.json.JsonConfigurationCodec
-import io.github.avtobot22.featureflags.retrofit.FeatureTogglesApi
 import io.github.avtobot22.featureflags.retrofit.RetrofitFeatureFlagsSource
-import retrofit2.Retrofit
+import okhttp3.ResponseBody
+import retrofit2.Response
 
-fun createAndroidFlags(retrofit: Retrofit, assets: AssetManager): FeatureFlagsSystem =
+fun createAndroidFlags(
+    request: suspend () -> Response<ResponseBody>,
+    assets: AssetManager,
+): FeatureFlagsSystem =
     FeatureFlagsSystem(
-        remote = RetrofitFeatureFlagsSource(retrofit.create(FeatureTogglesApi::class.java)),
+        remote = RetrofitFeatureFlagsSource(request),
         codec = JsonConfigurationCodec,
         fallback = FallbackPolicy.OnRemoteEmpty,
         local = AssetsFeatureFlagsSource(assets),
@@ -63,9 +66,9 @@ fun createAndroidFlags(retrofit: Retrofit, assets: AssetManager): FeatureFlagsSy
 
 Приложение добавляет `android.permission.INTERNET` и файл `src/main/assets/FallbackFeatureToggles.json`. Имя или путь внутри assets можно передать вторым аргументом источника. SDK не поставляет локальную конфигурацию; отсутствующий файл даёт `LocalSource`, невалидный JSON - `InvalidConfiguration(BUNDLED_ASSET, cause)`.
 
-API выполняет `GET api/tv/feature-toggles` относительно `baseUrl` Retrofit, включая его префикс пути, с `Content-Type: application/json` и `X-Endpoint-Version: 1`. Принимается только HTTP 200; HTTP 204 и другие статусы дают ошибку источника. Тело передаётся codec без преобразования; JSON converter для Retrofit не требуется.
+В `request` передаётся вызов своего Retrofit-метода, например `api::getFlags`, возвращающего `Response<ResponseBody>`. Приложение определяет HTTP-метод, URL и заголовки. Адаптер принимает успешный ответ 2xx с телом; ответы без тела, включая HTTP 204/205, дают ошибку источника. Пустое или невалидное тело при HTTP 200 проверяет codec. JSON converter для Retrofit не требуется.
 
-Приложение настраивает base URL, таймауты, retry и авторизацию в своём Retrofit/OkHttp клиенте. Его interceptor добавляет `Authorization: Bearer ...` только при наличии актуального токена. Адаптер не хранит токен и не создаёт клиент. Оба источника выполняют блокирующее чтение на IO и закрывают ресурсы; отмена распространяется вызывающему коду.
+Приложение настраивает таймауты, retry и авторизацию в своём Retrofit/OkHttp клиенте. Для отмены во время получения тела Retrofit-метод должен возвращать буферизованный `ResponseBody` без `@Streaming`. Оба источника выполняют блокирующее чтение на IO и закрывают ресурсы; отмена распространяется вызывающему коду.
 
 ## Чтение флагов
 

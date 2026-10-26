@@ -8,13 +8,18 @@ import kotlinx.coroutines.withTimeout
 import okhttp3.Call
 import okhttp3.EventListener
 import okhttp3.OkHttpClient
+import okhttp3.ResponseBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import retrofit2.HttpException
+import retrofit2.Response
 import retrofit2.Retrofit
+import retrofit2.http.GET
+import retrofit2.http.Headers
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -33,19 +38,28 @@ class RetrofitFeatureFlagsSourceTest {
     }
 
     @Test
-    fun `request uses GET path and required headers without body query or implicit auth`() = runBlocking {
+    fun `endpoint and headers belong to application request`() = runBlocking {
         val json = """{"featureToggles":[],"title":"Флаги"}"""
-        server.enqueue(MockResponse().setBody(json).setHeader("Content-Type", "application/json"))
+        val api = api()
+        repeat(2) { server.enqueue(MockResponse().setBody(json).setHeader("Content-Type", "application/json")) }
 
-        assertEquals(json, source().loadJson())
+        assertEquals(json, RetrofitFeatureFlagsSource(api::getFlags).loadJson())
 
         val request = assertNotNull(server.takeRequest(5, TimeUnit.SECONDS))
         assertEquals("GET", request.method)
-        assertEquals("/api/tv/feature-toggles", request.path)
+        assertEquals("/configuration/mobile", request.path)
         assertEquals(0, request.bodySize)
-        assertEquals("application/json", request.getHeader("Content-Type"))
-        assertEquals("1", request.getHeader("X-Endpoint-Version"))
+        assertNull(request.getHeader("Content-Type"))
+        assertNull(request.getHeader("X-Endpoint-Version"))
         assertNull(request.getHeader("Authorization"))
+
+        assertEquals(json, RetrofitFeatureFlagsSource(api::getVersionedSettings).loadJson())
+
+        val versionedRequest = assertNotNull(server.takeRequest(5, TimeUnit.SECONDS))
+        assertEquals("/v2/settings/flags", versionedRequest.path)
+        assertEquals("application/vnd.settings+json", versionedRequest.getHeader("Accept"))
+        assertEquals("7", versionedRequest.getHeader("X-App-Schema"))
+        assertNull(versionedRequest.getHeader("X-Endpoint-Version"))
     }
 
     @Test
@@ -68,13 +82,32 @@ class RetrofitFeatureFlagsSourceTest {
     }
 
     @Test
-    fun `non-200 responses including successful no-content are protocol errors`() = runBlocking {
-        for (code in listOf(201, 204, 205, 401, 403, 404, 500)) {
+    fun `unsuccessful responses are HTTP errors`() = runBlocking {
+        for (code in listOf(400, 401, 403, 404, 500)) {
             server.enqueue(MockResponse().setResponseCode(code))
 
             val failure = assertFailsWith<HttpException> { source().loadJson() }
 
             assertEquals(code, failure.code())
+        }
+    }
+
+    @Test
+    fun `successful HTTP statuses with document body are accepted`() = runBlocking {
+        val json = """{"featureToggles":[]}"""
+        for (code in listOf(200, 201, 202, 206, 299)) {
+            server.enqueue(MockResponse().setResponseCode(code).setBody(json))
+
+            assertEquals(json, source().loadJson())
+        }
+    }
+
+    @Test
+    fun `successful no-content response fails as missing document`() = runBlocking {
+        for (code in listOf(204, 205)) {
+            server.enqueue(MockResponse().setResponseCode(code))
+
+            assertFailsWith<IOException> { source().loadJson() }
         }
     }
 
@@ -138,7 +171,21 @@ class RetrofitFeatureFlagsSourceTest {
     }
 
     private fun source(httpClient: OkHttpClient = client): RetrofitFeatureFlagsSource {
+        val api = api(httpClient)
+        return RetrofitFeatureFlagsSource(api::getFlags)
+    }
+
+    private fun api(httpClient: OkHttpClient = client): ApplicationFlagsApi {
         val retrofit = Retrofit.Builder().baseUrl(server.url("/")).client(httpClient).build()
-        return RetrofitFeatureFlagsSource(retrofit.create(FeatureTogglesApi::class.java))
+        return retrofit.create(ApplicationFlagsApi::class.java)
+    }
+
+    private interface ApplicationFlagsApi {
+        @GET("configuration/mobile")
+        suspend fun getFlags(): Response<ResponseBody>
+
+        @GET("v2/settings/flags")
+        @Headers("Accept: application/vnd.settings+json", "X-App-Schema: 7")
+        suspend fun getVersionedSettings(): Response<ResponseBody>
     }
 }
