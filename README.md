@@ -2,12 +2,12 @@
 
 Типобезопасный SDK фича-тоглов для Kotlin и Android. Ядро работает на JVM без Android SDK.
 
-Реализованы определения флагов, атомарные снимки, Reader с Flow и readiness, JSON codec, ручная загрузка с явной политикой fallback, адаптеры Retrofit/Android assets и постоянный кэш с явными политиками загрузки. Опубликованных артефактов нет.
+Реализованы определения флагов, атомарные снимки, Reader с Flow и readiness, JSON codec, ручная загрузка с явной политикой fallback, адаптеры Retrofit/Android assets, постоянный кэш с явными политиками загрузки и стабильная процентная раскатка. Опубликованных артефактов нет.
 
 ## Модули
 
 - `feature-flags-core` - определения, параметры, `Configuration`, `ConfigurationCodec`, `FeatureFlagsReader`, `Readiness`, порт кэша и загрузка через `FeatureFlagsSystem`. Использует Kotlin и coroutines; не зависит от Android и JSON-библиотек.
-- `feature-flags-json` - полный ответ через `JsonConfigurationCodec.decode` и отдельные параметры JSON object/null через `JsonParameters.decode`. Строки, дроби, экспоненциальная запись и переполнение не преобразуются в `Int`, а дают default параметра.
+- `feature-flags-json` - исходный ответ через `JsonConfigurationCodec.decode`, правила раскатки v2 через `JsonRolloutConfigurationCodec.decode` и отдельные параметры JSON object/null через `JsonParameters.decode`. Строки, дроби, экспоненциальная запись и переполнение не преобразуются в `Int`, а дают default параметра.
 - `feature-flags-retrofit` - JVM-источник `RetrofitFeatureFlagsSource`. Получает suspend-функцию запроса приложения без привязки к endpoint и заголовкам.
 - `feature-flags-android` - `AssetsFeatureFlagsSource` для UTF-8 файлов из assets и `AtomicFileConfigurationCache` для постоянного кэша, Android API 21+.
 
@@ -39,6 +39,38 @@ fun createFlags(remote: FeatureFlagsSource, local: FeatureFlagsSource): FeatureF
 Конкурентные `refresh()` выполняются последовательно. `Applied` содержит revision, origin и число флагов. `refreshStatus` показывает `Idle`, `Running` или `Finished(result)` отдельно от readiness. Ошибки источников дают `Transport` или `LocalSource`, ошибки codec по `IllegalArgumentException` - `InvalidConfiguration(origin, cause)`. Произвольные ошибки codec распространяются вызывающему коду. Causes могут содержать приватные данные, поэтому их нельзя автоматически писать в логи.
 
 Ошибка загрузки сохраняет активный снимок. Отмена распространяется как `CancellationException`: до публикации она сохраняет прежнее состояние, после атомарной публикации новый снимок уже активен. При отмене выполняющегося обновления или неожиданной ошибке codec статус возвращается в `Idle`; отмена ожидающего вызова не меняет статус текущего обновления.
+
+## Процентная раскатка
+
+Для общих серверных правил используй отдельный `JsonRolloutConfigurationCodec` и согласованный endpoint v2. Формат отличается от исходного `featureToggles`, чтобы старый клиент отклонил ответ, а не включил функцию всем:
+
+```json
+{"schemaVersion":2,"flags":[{"feature":"dashboard.guestMode","enabled":true,"rollout":{"kind":"percentage","basisPoints":2500,"group":"guest-v1"}}]}
+```
+
+`basisPoints` - целое от 0 до 10000: 2500 означает 25%, точность 0.01%. Поле `rollout` необязательно; при его наличии обязательны все три поля правила. Неизвестная версия, дополнительные поля v2, неизвестный `kind`, неверный процент и повторяющиеся управляющие поля отклоняют весь документ. `parameters` сохраняет прежние правила. Исходный codec отклоняет версионированные поля и `rollout` в старом формате.
+
+```kotlin
+import io.github.avtobot22.featureflags.EvaluationContext
+import io.github.avtobot22.featureflags.FallbackPolicy
+import io.github.avtobot22.featureflags.FeatureFlagsSystem
+import io.github.avtobot22.featureflags.json.JsonRolloutConfigurationCodec
+
+val rolloutSystem = FeatureFlagsSystem(
+    remote = remote,
+    codec = JsonRolloutConfigurationCodec,
+    fallback = FallbackPolicy.Never,
+)
+val sessionReader = rolloutSystem.reader.withContext(EvaluationContext(stableTargetingKey))
+```
+
+`stableTargetingKey` задаёт приложение: стабильный непрозрачный ключ пользователя или установки, без токенов. SDK не собирает ID. Пустой ключ отклоняется; без ключа правило выключает флаг даже при 100%. При валидном ключе 0% выключает, 100% включает. `enabled=false` всегда выключает; параметры сохраняются. Отсутствующий флаг использует default определения.
+
+Один `group` задаёт общее распределение нескольких флагов. SHA-256 вычисляется от ASCII `feature-flags/percentage-v1`, затем UTF-8 `group` и ключа, каждый с 4-байтной big-endian длиной перед ним. Первые 32 бита digest без знака по модулю 10000 задают bucket; включение - bucket < basisPoints. Например, `guest-v1`/`user-1` даёт bucket 2462. Ключи чувствительны к регистру и не нормализуются. При неизменных ключе и группе рост процента сохраняет участников; доля на конечной аудитории приблизительна.
+
+Reader навсегда привязан к переданному контексту, а `get`/`observe` используют общий активный снимок без I/O. При смене сессии приложение заменяет Reader и отменяет старые подписки. Создание нового представления не меняет контекст прежних подписчиков. Прямой `configuration.evaluate(definition, context)` поддерживает те же правила.
+
+Кэш хранит общие правила, которые оцениваются для ключа текущего Reader. Включай endpoint и версию codec в область кэша; персонализированные сервером ответы требуют отдельной области и invalidation при смене сессии. Серверное выключение действует после получения новой конфигурации. Для критичных флагов выбирай `REMOTE_ONLY` без restore либо `maxAgeMillis=ttlMillis` для запрета stale и ограничивай в приложении время, в течение которого читается активный снимок: TTL автоматически его не снимает.
 
 ## Постоянный кэш
 
@@ -145,7 +177,7 @@ val enabled = configuration.evaluate(guestMode)
 
 Codec проверяет весь документ и возвращает неизменяемую `Configuration`: `flagCount` содержит число различных ключей, `isEmpty` отличает успешный пустой набор. `evaluate` использует те же определения и defaults, что Reader; ошибки decoder распространяются вызывающему коду. Разбор не публикует снимок и не запускает загрузку. Собственный codec должен возвращать неизменяемую, безопасную для параллельного чтения конфигурацию с неотрицательным `flagCount` и согласованным `isEmpty`.
 
-`featureToggles`, строковый `feature` и Boolean `enabled` обязательны. `parameters` допускает объект, `null` или отсутствие. Неверная схема, синтаксическая ошибка и повторяющиеся ключи флагов дают `IllegalArgumentException`. Регистр ключей значим. Неизвестные флаги и параметры сохраняются, дополнительные поля ответа и флага игнорируются.
+`featureToggles`, строковый `feature` и Boolean `enabled` обязательны. `parameters` допускает объект, `null` или отсутствие. Неверная схема, синтаксическая ошибка и повторяющиеся ключи флагов дают `IllegalArgumentException`. Регистр ключей значим. Неизвестные флаги и параметры сохраняются, дополнительные поля исходного ответа и флага игнорируются, кроме зарезервированных полей версии/раскатки. Повторяющиеся управляющие поля отклоняются обоими codec.
 
 ## Сборка и проверки
 

@@ -9,4 +9,7 @@ public interface Configuration {
 
     /** Uses defaults for an absent key and propagates definition and decoder exceptions. */
     public fun <T> evaluate(definition: FlagDefinition<T>): T
+
+    /** Context-free implementations may retain this default; targeting implementations must override it. */
+    public fun <T> evaluate(definition: FlagDefinition<T>, context: EvaluationContext): T = evaluate(definition)
 }
